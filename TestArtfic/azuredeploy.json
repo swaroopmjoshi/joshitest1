@@ -1,0 +1,274 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "deploymentId": {
+            "type": "string",
+            "defaultValue": "[uniqueString(resourceGroup().id)]",
+            "metadata": {
+                "description": "the prefix id on each resource"
+            }
+        },
+        "env": {
+            "type": "string",
+            "minLength": 1,
+            "metadata": {
+                "description": "The env you want to provision, such as dev, qa, uat or prod"
+            }
+        },
+        "location": {
+            "type": "string",
+            "defaultValue": "australiaeast"
+        },
+        "publisherEmail": {
+            "type": "string",
+            "minLength": 1,
+            "metadata": {
+                "description": "The email address of the owner of the service"
+            }
+        },
+        "publisherName": {
+            "type": "string",
+            "minLength": 1,
+            "metadata": {
+                "description": "The name of the owner of the service"
+            }
+        },
+        "tier": {
+            "type": "string",
+            "allowedValues": [
+                "Developer",
+                "Basic",
+                "Standard",
+                "Premium"
+            ],
+            "defaultValue": "Basic",
+            "metadata": {
+                "description": "The pricing tier of this API Management service"
+            }
+        },
+        "capacity": {
+            "type": "int",
+            "defaultValue": 1,
+            "metadata": {
+                "description": "The instance size of this API Management service."
+            }
+        },
+        "sku": {
+            "type": "string",
+            "allowedValues": [
+                "F1",
+                "B1",
+                "B2",
+                "B3",
+                "S1",
+                "S2",
+                "S3",
+                "P1",
+                "P2",
+                "P3",
+                "P1V2",
+                "P2V2",
+                "P3V2"
+            ],
+            "defaultValue": "B2",
+            "metadata": {
+                "description": "The pricing tier for the hosting plan."
+            }
+        },
+        "numberOfInstances": {
+            "type": "int",
+            "defaultValue": 1,
+            "metadata": {
+                "description": "number of running instances for service plan"
+            }
+        },
+        "storageAccountType": {
+            "type": "string",
+            "defaultValue": "Standard_GRS",
+            "allowedValues": [
+                "Standard_LRS",
+                "Standard_GRS",
+                "Standard_RAGRS"
+            ],
+            "metadata": {
+                "description": "Storage Account type"
+            }
+        }
+    },
+    "variables": {
+        "independentEnvs": [
+            "uat",
+            "prod"
+        ],
+        
+        "indepedentHostingPlanName": "[concat(parameters('deploymentId'),  '-serviceplan-', parameters('env'))]",
+        "sharedHostingPlanName": "[concat(parameters('deploymentId'), '-serviceplan-shared')]",
+        "hostingPlanName": "[if(contains(variables('independentEnvs'), parameters('env')), variables('indepedentHostingPlanName'), variables('sharedHostingPlanName'))]",
+        "appStorageAccountName": "[concat(replace(parameters('deploymentId'), '-', ''),'funcapp', parameters('env'))]",
+        "independentFileUploadStorageAccountName": "[concat(replace(parameters('deploymentId'), '-', ''), 'file', parameters('env'))]",
+        "apiManagementServiceName": "[concat(parameters('deploymentId'),  '-apimanager-', parameters('env'))]",
+        "sharedFileUploadStorageAccountName": "[concat(replace(parameters('deploymentId'), '-', ''),'fileshared')]",
+        "fileUploadStorageAccountName": "[if(contains(variables('independentEnvs'), parameters('env')), variables('independentFileUploadStorageAccountName'), variables('sharedFileUploadStorageAccountName'))]",
+        "functionAppName": "[concat(parameters('deploymentId'), '-funcapp-',  parameters('env'))]"
+    },
+    "resources": [
+        {
+            "condition": "[contains(variables('independentEnvs'), parameters('env'))]",
+            "apiVersion": "2019-01-01",
+            "name": "[variables('apiManagementServiceName')]",
+            "location": "[parameters('location')]",
+            "type": "Microsoft.ApiManagement/service",
+            "sku": {
+                "name": "[parameters('tier')]",
+                "capacity": "[parameters('capacity')]"
+            },
+            "properties": {
+                "publisherEmail": "[parameters('publisherEmail')]",
+                "publisherName": "[parameters('publisherName')]"
+            },
+            "tags": {
+                "displayName": "ApiManagementService"
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "name": "[variables('appStorageAccountName')]",
+            "apiVersion": "2019-04-01",
+            "location": "[parameters('location')]",
+            "kind": "StorageV2",
+            "sku": {
+                "name": "[parameters('storageAccountType')]"
+            },
+            "tags": {
+                "displayName": "FunctionAppStorage"
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "name": "[variables('fileUploadStorageAccountName')]",
+            "apiVersion": "2019-04-01",
+            "location": "[parameters('location')]",
+            "kind": "StorageV2",
+            "sku": {
+                "name": "[parameters('storageAccountType')]"
+            },
+            "tags": {
+                "displayName": "FileUploadingAppStorage"
+            }
+        },
+        {
+            "type": "Microsoft.Web/serverfarms",
+            "apiVersion": "2018-02-01",
+            "name": "[variables('hostingPlanName')]",
+            "location": "[parameters('location')]",
+            "sku": {
+                "Name": "[parameters('sku')]",
+                "Capacity": "[parameters('numberOfInstances')]"
+            },
+            "tags": {
+                "displayName": "FunctionAppServicePlan"
+            },
+            "properties": {
+                "name": "[variables('hostingPlanName')]",
+                "maximumElasticWorkerCount": "[parameters('numberOfInstances')]"
+            }
+        },
+        {
+            "apiVersion": "2018-11-01",
+            "type": "Microsoft.Web/sites",
+            "name": "[variables('functionAppName')]",
+            "location": "[parameters('location')]",
+            "kind": "functionapp",
+            "properties": {
+                "name": "[variables('functionAppName')]",
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('hostingPlanName'))]",
+                "clientAffinityEnabled": false,
+                "siteConfig": {
+                    "alwaysOn": true,
+                    "ipSecurityRestrictions": [
+                        {
+                            "ipAddress": "52.65.200.113/32",
+                            "action": "Allow",
+                            "priority": 310,
+                            "name": "octopus-deploy",
+                            "description": "allow octopus deploy ip"
+                        },
+                        {
+                            "ipAddress": "123.243.26.26/32",
+                            "action": "Allow",
+                            "priority": 320,
+                            "name": "ac3",
+                            "description": "allow ac3 ip"
+                        },
+                        {
+                            "ipAddress": "203.214.166.169/27",
+                            "action": "Allow",
+                            "priority": 330,
+                            "name": "bridgestone-au",
+                            "description": "allow bridgestone-au ip"
+                        },
+                        {
+                            "ipAddress": "49.255.75.18/30",
+                            "action": "Allow",
+                            "priority": 340,
+                            "name": "bridgestone-nz",
+                            "description": "allow bridgestone-nz ip"
+                        },
+                        {
+                            "ipAddress": "101.100.146.39/32",
+                            "action": "Allow",
+                            "priority": 350,
+                            "name": "akqa-wpp-office-1",
+                            "description": "allow akqa-wpp-office-1 ip"
+                        },
+                        {
+                            "ipAddress": "125.236.216.134/32",
+                            "action": "Allow",
+                            "priority": 360,
+                            "name": "akqa-wpp-office-2",
+                            "description": "allow akqa-wpp-office-2 ip"
+                        },
+                        {
+                            "ipAddress": "111.93.124.228/32",
+                            "action": "Allow",
+                            "priority": 370,
+                            "name": "akqa-wpp-office-3",
+                            "description": "allow akqa-wpp-office-3 ip"
+                        },
+                        {
+                            "ipAddress": "103.17.59.1/27",
+                            "action": "Allow",
+                            "priority": 380,
+                            "name": "akqa-wpp-office-4",
+                            "description": "allow akqa-wpp-office-4 ip"
+                        }
+                    ]
+                }
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/serverfarms', variables('hostingPlanName'))]",
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('appStorageAccountName'))]"
+            ],
+            "tags": {
+                "displayName": "FunctionApp"
+            },
+            "resources": [
+                {
+                    "apiVersion": "2018-11-01",
+                    "name": "appsettings",
+                    "type": "config",
+                    "dependsOn": [
+                        "[resourceId('Microsoft.Web/sites', variables('functionAppName'))]",
+                        "[resourceId('Microsoft.Storage/storageAccounts', variables('appStorageAccountName'))]"
+                    ],
+                    "properties": {
+                        "AzureWebJobsStorage": "[concat('DefaultEndpointsProtocol=https;AccountName=',variables('appStorageAccountName'),';AccountKey=',listkeys(resourceId('Microsoft.Storage/storageAccounts', variables('appStorageAccountName')), '2015-05-01-preview').key1,';')]",
+                        "FUNCTIONS_WORKER_RUNTIME": "dotnet",
+                        "FUNCTIONS_EXTENSION_VERSION": "~3"
+                    }
+                }
+            ]
+        }
+    ]
+}
