@@ -6,7 +6,7 @@
             "value": "bs-functiontest"
         },
         "env": {
-            "value": "prod"
+            "value": "qa"
         },
         "location": {
             "value": "australiaeast"
